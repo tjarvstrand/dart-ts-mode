@@ -535,9 +535,18 @@ Return nil if there is no name or NODE."
         ;; Emacs 30+.
         (setq-local treesit-thing-settings
                     `((dart
-                       ;; It's more useful to include semicolons as sexp so
-                       ;; that users can move to the end of a statement.
-                       (sexp (not ,(rx (or "{" "}" "[" "]" "(" ")" ","))))
+                       ;; Only leaf-level and balanced-expression nodes are sexps
+                       (sexp ,(rx string-start
+                                  (or "identifier" "type_identifier"
+                                      "inferred_type" "void_type" "function_type"
+                                      "true" "false" "this" "super"
+                                      "annotation"
+                                      "comment" "documentation_comment"
+                                      "expression_statement"
+                                      "block" "arguments"
+                                      (seq (+ anything) "_literal")
+                                      (seq (+ anything) "_expression"))
+                                  string-end))
                        (sentence ,(regexp-opt dart-ts-mode--sentence-nodes))
                        (text ,(regexp-opt dart-ts-mode--text-nodes)))))
       ;; (setq-local treesit-sexp-type-regexp
