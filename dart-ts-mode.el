@@ -480,6 +480,69 @@ Return nil if there is no name or NODE."
   (when (string-equal "mixin_declaration" (treesit-node-type node))
     (treesit-node-text (treesit-node-child node 1) t)))
 
+;;;; Syntax propertize.
+
+(defvar dart-ts-mode--syntax-propertize
+  (syntax-propertize-rules
+   ((rx (or (seq (group-n 1 "r") (group-n 2 (or "'''" "\"\"\"")))
+            (group-n 2 (or "'''" "\"\"\""))
+            (seq "r" (group-n 3 (or "'" "\"")))))
+    (0 (ignore (dart-ts-mode--propertize-string))))))
+
+(defun dart-ts-mode--propertize-string ()
+  "Propertize Dart string syntax."
+  (cond
+   ;; Triple-quoted string (raw or normal)
+   ((match-beginning 2)
+    (dart-ts-mode--propertize-triple-quote (match-beginning 1)))
+   ;; Raw single-line string
+   ((match-beginning 3)
+    (dart-ts-mode--propertize-raw-single-quote))))
+
+(defun dart-ts-mode--propertize-triple-quote (raw-p)
+  "Propertize triple-quote delimiter.  RAW-P non-nil means raw string."
+  (let* ((start (match-beginning 2))
+         (end (match-end 2))
+         (quote-str (match-string 2))
+         (ppss (save-excursion (syntax-ppss start))))
+    (if (nth 3 ppss)
+        ;; Closing: first two punctuation, last string-fence
+        (progn
+          (put-text-property start (1- end)
+                             'syntax-table (string-to-syntax "."))
+          (put-text-property (1- end) end
+                             'syntax-table (string-to-syntax "|")))
+      ;; Opening: first string-fence, next two punctuation
+      (put-text-property start (1+ start)
+                         'syntax-table (string-to-syntax "|"))
+      (put-text-property (1+ start) end
+                         'syntax-table (string-to-syntax "."))
+      ;; For raw strings, neutralize all backslashes up to closing delimiter
+      (when raw-p
+        (save-excursion
+          (goto-char end)
+          (when (search-forward quote-str nil t)
+            (let ((str-end (match-beginning 0)))
+              (goto-char end)
+              (while (search-forward "\\" str-end t)
+                (put-text-property (1- (point)) (point)
+                                   'syntax-table (string-to-syntax "."))))))))))
+
+(defun dart-ts-mode--propertize-raw-single-quote ()
+  "Propertize raw single-line string to neutralize backslashes."
+  (let* ((quote-pos (match-beginning 3))
+         (quote-char (char-after quote-pos))
+         (ppss (save-excursion (syntax-ppss quote-pos))))
+    (when (not (nth 3 ppss))
+      (save-excursion
+        (goto-char (1+ quote-pos))
+        ;; No escaping in raw strings — first matching quote ends it
+        (when-let* ((str-end (search-forward (char-to-string quote-char) nil t)))
+          (goto-char (1+ quote-pos))
+          (while (search-forward "\\" (1- str-end) t)
+            (put-text-property (1- (point)) (point)
+                               'syntax-table (string-to-syntax "."))))))))
+
 (defun dart-ts-mode--electric-pair-string-delimiter ()
   "Insert corresponding multi-line string for `electric-pair-mode'."
   (when (and electric-pair-mode
@@ -509,6 +572,9 @@ Return nil if there is no name or NODE."
 
   (setq-local electric-layout-rules
               '((?\; . after) (?\{ . after) (?\} . before)))
+
+  ;; Syntax propertize.
+  (setq-local syntax-propertize-function dart-ts-mode--syntax-propertize)
 
   ;; Add """ ... """ pairing to `electric-pair-mode'.
   (add-hook 'post-self-insert-hook
